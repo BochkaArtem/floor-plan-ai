@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Floor Plan AI</title>
+    <link rel="stylesheet" href="/static/css/main.css" />
+    <script src="https://unpkg.com/konva@9/konva.min.js"></script>
+  </head>
+  <body>
+    <header>
+      <h1>Floor Plan AI</h1>
+      <nav>
+        <button class="tab active" data-tab="annotate">Разметка</button>
+        <button class="tab" data-tab="generate">Генерация</button>
+        <a class="docs" href="https://github.com/BochkaArtem/floor-plan-ai" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </header>
+
+    <main>
+      <!-- Tab: Annotate -->
+      <section id="tab-annotate" class="tab-panel active">
+        <aside class="sidebar">
+          <h2>1. Изображение</h2>
+          <label class="file-button">
+            <input type="file" id="image-input" accept="image/*" hidden />
+            Загрузить план
+          </label>
+          <button id="auto-detect" disabled>Авто-разметка</button>
+          <p id="detect-status" class="status"></p>
+
+          <h2>2. Класс</h2>
+          <div class="class-picker">
+            <label><input type="radio" name="class" value="wall" checked /><span class="swatch wall"></span>стена</label>
+            <label><input type="radio" name="class" value="window" /><span class="swatch window"></span>окно</label>
+            <label><input type="radio" name="class" value="door" /><span class="swatch door"></span>дверь</label>
+            <label><input type="radio" name="class" value="room" /><span class="swatch room"></span>комната</label>
+          </div>
+
+          <h2>3. Инструменты</h2>
+          <div class="tool-buttons">
+            <button id="tool-select" class="tool active">Выделить</button>
+            <button id="tool-add" class="tool">Новый полигон</button>
+            <button id="tool-delete" class="tool">Удалить</button>
+          </div>
+          <p class="hint">
+            Полигон: клики добавляют точки, <kbd>Enter</kbd> или двойной клик завершают.
+            <br />Точки можно перетаскивать.
+          </p>
+
+          <h2>4. Экспорт</h2>
+          <button id="export-coco" disabled>Скачать COCO JSON</button>
+          <label class="file-button secondary">
+            <input type="file" id="import-coco" accept="application/json" hidden />
+            Загрузить COCO
+          </label>
+          <button id="clear-annotations">Очистить</button>
+        </aside>
+
+        <div class="canvas-wrapper">
+          <div id="canvas-container"></div>
+          <p id="canvas-empty">Загрузите план, чтобы начать.</p>
+        </div>
+      </section>
+
+      <!-- Tab: Generate -->
+      <section id="tab-generate" class="tab-panel">
+        <aside class="sidebar">
+          <h2>Условия генерации</h2>
+          <label>Ширина (px)
+            <input type="number" id="gen-width" value="640" min="320" max="960" />
+          </label>
+          <label>Высота (px)
+            <input type="number" id="gen-height" value="480" min="240" max="720" />
+          </label>
+          <label>Площадь (м², опц.)
+            <input type="number" id="gen-area" placeholder="напр. 60" min="20" max="200" />
+          </label>
+          <label>Кол-во комнат
+            <input type="number" id="gen-rooms" value="4" min="1" max="10" />
+          </label>
+          <label>Форма границы
+            <select id="gen-shape">
+              <option value="rect">Прямоугольник</option>
+              <option value="L">L-образная</option>
+            </select>
+          </label>
+          <label>Seed (опц.)
+            <input type="number" id="gen-seed" placeholder="любое число" />
+          </label>
+          <button id="gen-run">Сгенерировать план</button>
+          <p id="gen-status" class="status"></p>
+
+          <h2>Действия</h2>
+          <button id="gen-to-editor" disabled>Перенести в редактор разметки</button>
+        </aside>
+
+        <div class="canvas-wrapper">
+          <img id="gen-image" alt="Сгенерированная планировка" />
+          <p id="gen-empty">Задайте параметры и нажмите «Сгенерировать план».</p>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span>Floor Plan AI · prototype</span>
+      <span id="model-badge"></span>
+    </footer>
+
+    <script type="module" src="/static/js/app.js"></script>
+  </body>
+</html>

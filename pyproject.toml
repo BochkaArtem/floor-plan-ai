@@ -1,0 +1,36 @@
+[project]
+name = "floor-plan-ai"
+version = "0.1.0"
+description = "Web prototype for floor plan auto-annotation, manual correction, COCO export and conditional generation"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Floor Plan AI" }]
+dependencies = [
+    "flask>=3.0",
+    "pillow>=10.0",
+    "numpy>=1.26",
+    "opencv-python-headless>=4.9",
+    "scikit-image>=0.22",
+    "shapely>=2.0",
+    "matplotlib>=3.8",
+    "pycocotools>=2.0.7",
+    "tqdm>=4.66",
+    "torch>=2.2",
+    "torchvision>=0.17",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.4"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
