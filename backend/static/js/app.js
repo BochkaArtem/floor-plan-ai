@@ -52,25 +52,29 @@ imageInput.addEventListener("change", async (e) => {
     return;
   }
   const data = await resp.json();
-  loadImageOnCanvas(data);
+  await loadImageOnCanvas(data);
   setStatus("detect-status", "Готово. Нажмите «Авто-разметка».");
 });
 
-async function loadImageOnCanvas(data) {
+function loadImageOnCanvas(data) {
   state.imageId = data.image_id;
   state.imageWidth = data.width;
   state.imageHeight = data.height;
   state.polygons = [];
 
-  const img = new Image();
-  img.onload = () => {
-    state.imageElement = img;
-    initStage();
-    document.getElementById("auto-detect").disabled = false;
-    document.getElementById("export-coco").disabled = false;
-    document.getElementById("canvas-empty").style.display = "none";
-  };
-  img.src = data.data_url;
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      state.imageElement = img;
+      initStage();
+      document.getElementById("auto-detect").disabled = false;
+      document.getElementById("export-coco").disabled = false;
+      document.getElementById("canvas-empty").style.display = "none";
+      resolve();
+    };
+    img.onerror = reject;
+    img.src = data.data_url;
+  });
 }
 
 function initStage() {
@@ -409,7 +413,10 @@ document.getElementById("gen-to-editor").addEventListener("click", async () => {
   });
   if (!resp.ok) return;
   const data = await resp.json();
-  loadImageOnCanvas(data);
+  // Switch to the annotation tab first so the canvas wrapper is visible
+  // and initStage() can size the stage correctly.
+  document.querySelector('nav .tab[data-tab="annotate"]').click();
+  await loadImageOnCanvas(data);
   // Pre-load polygons from generation as editable annotations.
   lastGenerated.polygons.forEach((p) => {
     const poly = { id: cryptoRandomId(), category: p.category, points: p.points };
@@ -417,8 +424,6 @@ document.getElementById("gen-to-editor").addEventListener("click", async () => {
     drawPolygon(poly);
   });
   state.polyLayer.draw();
-  // Switch tab.
-  document.querySelector('nav .tab[data-tab="annotate"]').click();
 });
 
 // ---------------------------------------------------------------------------
