@@ -143,15 +143,34 @@ class UNetSegmenter:
     def _load_model(self):
         import torch
 
-        from .unet import UNet  # local import to avoid hard torch dependency at import time
+        from .unet import UNet
 
-        model = UNet(in_channels=3, num_classes=4)
-        state = torch.load(self.weights_path, map_location="cpu")
-        if isinstance(state, dict) and "model" in state:
-            state = state["model"]
-        model.load_state_dict(state)
-        model.eval()
-        return model
+        # Try 5-class first (current scheme: bg, wall, window, door, room),
+        # fall back to legacy 4-class.
+        for num_classes in (5, 4):
+            try:
+                model = UNet(in_channels=3, num_classes=num_classes, base=16)
+                state = torch.load(self.weights_path, map_location="cpu")
+                if isinstance(state, dict) and "model" in state:
+                    state = state["model"]
+                model.load_state_dict(state)
+                model.eval()
+                self._num_classes = num_classes
+                return model
+            except RuntimeError:
+                # base=16 channel counts didn't match; try base=32 (legacy default).
+                try:
+                    model = UNet(in_channels=3, num_classes=num_classes, base=32)
+                    state = torch.load(self.weights_path, map_location="cpu")
+                    if isinstance(state, dict) and "model" in state:
+                        state = state["model"]
+                    model.load_state_dict(state)
+                    model.eval()
+                    self._num_classes = num_classes
+                    return model
+                except RuntimeError:
+                    continue
+        raise RuntimeError("Could not load segmentation weights")
 
     def segment(self, image_rgb: np.ndarray) -> list[Polygon]:
         if not self.available():
@@ -166,21 +185,29 @@ class UNetSegmenter:
             self._model = self._load_model()
 
         h, w = image_rgb.shape[:2]
-        # Resize to a network-friendly size.
-        target = 512
+        # Resize to a network-friendly size matching the training resolution.
+        target = 128
         resized = cv2.resize(image_rgb, (target, target), interpolation=cv2.INTER_AREA)
         tensor = torch.from_numpy(resized).permute(2, 0, 1).float().unsqueeze(0) / 255.0
         with torch.no_grad():
             logits = self._model(tensor)
         pred = logits.argmax(dim=1).squeeze(0).numpy().astype(np.uint8)
-        # Resize back to original.
         pred = cv2.resize(pred, (w, h), interpolation=cv2.INTER_NEAREST)
 
+        # Index → category mapping. The 5-class scheme reserves 0 for
+        # background so categories start at 1.
+        if getattr(self, "_num_classes", 5) == 5:
+            mapping = {1: "wall", 2: "window", 3: "door", 4: "room"}
+        else:
+            mapping = {0: "wall", 1: "window", 2: "door", 3: "room"}
+
         polygons: list[Polygon] = []
-        for class_idx, name in enumerate(["wall", "window", "door", "room"]):
+        for class_idx, name in mapping.items():
             mask = (pred == class_idx).astype(np.uint8) * 255
             if mask.sum() == 0:
                 continue
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
             contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             polygons.extend(_contours_to_polygons(contours, category=name, min_area=40.0))
         return polygons

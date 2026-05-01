@@ -37,6 +37,9 @@ class Polygon:
 
     points: list[tuple[float, float]]
     category: str
+    # Optional semantic sub-label (e.g. "kitchen" for category="room").
+    # Persisted only as polygon metadata, not in COCO categories.
+    subcategory: str | None = None
 
     def flatten(self) -> list[float]:
         flat: list[float] = []
@@ -94,17 +97,18 @@ def build_coco_dict(images: list[CocoImage]) -> dict[str, Any]:
         for poly in img.polygons:
             if poly.category not in cat_id:
                 continue
-            coco_annotations.append(
-                {
-                    "id": next_ann_id,
-                    "image_id": image_id,
-                    "category_id": cat_id[poly.category],
-                    "segmentation": [poly.flatten()],
-                    "bbox": list(poly.bbox()),
-                    "area": poly.area(),
-                    "iscrowd": 0,
-                }
-            )
+            ann: dict[str, Any] = {
+                "id": next_ann_id,
+                "image_id": image_id,
+                "category_id": cat_id[poly.category],
+                "segmentation": [poly.flatten()],
+                "bbox": list(poly.bbox()),
+                "area": poly.area(),
+                "iscrowd": 0,
+            }
+            if poly.subcategory:
+                ann["subcategory"] = poly.subcategory
+            coco_annotations.append(ann)
             next_ann_id += 1
 
     return {
@@ -141,5 +145,7 @@ def load_coco(path: str | Path) -> list[CocoImage]:
         pts = [(float(flat[i]), float(flat[i + 1])) for i in range(0, len(flat), 2)]
         target = images_by_id.get(ann["image_id"])
         if target is not None:
-            target.polygons.append(Polygon(points=pts, category=cat_name))
+            target.polygons.append(
+                Polygon(points=pts, category=cat_name, subcategory=ann.get("subcategory"))
+            )
     return list(images_by_id.values())

@@ -15,7 +15,9 @@ sys.path.insert(0, str(ROOT))
 
 from backend.utils.coco import CocoImage, save_coco  # noqa: E402
 from backend.utils.image import save_image  # noqa: E402
-from backend.utils.synth import generate_layout  # noqa: E402
+from backend.utils.synth import generate_semantic_layout  # noqa: E402
+
+SHAPES = ["rect", "L", "T", "U", "plus", "random"]
 
 
 def main(num: int, out_dir: Path, seed: int) -> None:
@@ -26,19 +28,25 @@ def main(num: int, out_dir: Path, seed: int) -> None:
 
     coco_records: list[CocoImage] = []
     for idx in range(num):
-        # Vary canvas / room count for diversity.
         width = 480 + (idx % 4) * 80
         height = 360 + (idx % 3) * 60
         rooms = 3 + (idx % 5)
-        image, polygons = generate_layout(
-            width=width, height=height, num_rooms=rooms, seed=seed + idx
+        shape = SHAPES[idx % len(SHAPES)]
+        image, polygons, plan = generate_semantic_layout(
+            width=width, height=height, num_rooms=rooms,
+            boundary_shape=shape, seed=seed + idx,
+            draw_labels=False,
         )
         file_name = f"plan_{idx:03d}.png"
         save_image(image, images_dir / file_name)
         coco_records.append(
             CocoImage(file_name=file_name, width=width, height=height, polygons=polygons)
         )
-        print(f"Saved {file_name} ({width}×{height}, {rooms} rooms, {len(polygons)} polygons)")
+        room_types = sorted({r.type for r in plan.rooms})
+        print(
+            f"Saved {file_name} ({width}×{height}, shape={shape}, "
+            f"{rooms} rooms types={room_types}, {len(polygons)} polygons)"
+        )
 
     out_path = annotations_dir / "demo.coco.json"
     save_coco(coco_records, out_path)

@@ -36,6 +36,9 @@ Thumbs.db
 # Node (if added later)
 node_modules/
 
+# Training/inference logs
+logs/
+
 # Keep folder structure for ignored dirs
 !data/.gitkeep
 !models/.gitkeep

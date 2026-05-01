@@ -77,14 +77,38 @@
             <input type="number" id="gen-area" placeholder="напр. 60" min="20" max="200" />
           </label>
           <label>Кол-во комнат
-            <input type="number" id="gen-rooms" value="4" min="1" max="10" />
+            <input type="number" id="gen-rooms" value="5" min="1" max="10" />
           </label>
           <label>Форма границы
             <select id="gen-shape">
+              <option value="auto" selected>Авто (любая)</option>
               <option value="rect">Прямоугольник</option>
               <option value="L">L-образная</option>
+              <option value="T">T-образная</option>
+              <option value="U">U-образная</option>
+              <option value="plus">Крест (+)</option>
+              <option value="random">Случайная</option>
             </select>
           </label>
+
+          <fieldset class="room-types">
+            <legend>Какие комнаты включить</legend>
+            <label><input type="checkbox" name="rt" value="hall" checked /> прихожая</label>
+            <label><input type="checkbox" name="rt" value="living" checked /> гостиная</label>
+            <label><input type="checkbox" name="rt" value="kitchen" checked /> кухня</label>
+            <label><input type="checkbox" name="rt" value="bedroom" checked /> спальня</label>
+            <label><input type="checkbox" name="rt" value="bathroom" checked /> санузел</label>
+            <label><input type="checkbox" name="rt" value="balcony" /> балкон</label>
+          </fieldset>
+
+          <label>Бэкенд
+            <select id="gen-backend">
+              <option value="auto" selected>Авто (нейросеть, если есть)</option>
+              <option value="nn">Нейросеть (mask-unet)</option>
+              <option value="procedural">Правила (procedural)</option>
+            </select>
+          </label>
+
           <label>Seed (опц.)
             <input type="number" id="gen-seed" placeholder="любое число" />
           </label>

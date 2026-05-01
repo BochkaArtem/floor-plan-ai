@@ -2,10 +2,16 @@
 
 Produces:
     * a rasterised RGB image of a floor plan,
-    * a list of polygon annotations (walls, windows, doors, rooms).
+    * a list of polygon annotations (walls, windows, doors, rooms),
+    * (via :func:`planned_to_outputs`) a semantic 4-class mask suitable for
+      training the segmentation U-Net.
 
 Used both as a fast-path baseline generator for the ``/generate`` endpoint
-and as a source of synthetic demo data for COCO export and model training.
+and as a source of synthetic data for COCO export and model training.
+
+The :func:`generate_layout` entrypoint is kept for backward compatibility;
+new code should use :func:`generate_semantic_layout` which goes through the
+semantic planner and supports varied boundary shapes + room types.
 """
 
 from __future__ import annotations
@@ -14,9 +20,14 @@ import random
 from dataclasses import dataclass
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 from .coco import Polygon
+from .layout_planner import (
+    ROOM_TYPE_COLORS,
+    PlannedLayout,
+    plan_layout,
+)
 
 ROOM_PALETTE = [
     (255, 224, 178),
@@ -307,3 +318,268 @@ def render_layout(
         draw.polygon(poly.points, fill=(60, 140, 220))
 
     return np.array(img)
+
+
+# ---------------------------------------------------------------------------
+# Semantic (planner-driven) generation --------------------------------------
+# ---------------------------------------------------------------------------
+
+
+# 4-class index mask used to train the segmentation U-Net.
+# Background = 0, wall = 1, window = 2, door = 3, room = 4.
+# (We keep "room" separate from background so empty corridor space contrasts.)
+MASK_BACKGROUND = 0
+MASK_WALL = 1
+MASK_WINDOW = 2
+MASK_DOOR = 3
+MASK_ROOM = 4
+
+
+def _wall_strokes_from_planned(layout: PlannedLayout, thickness: float = 6.0) -> list[Polygon]:
+    """Build wall polygons for a planned layout: every room edge becomes a wall.
+
+    Walls are doubled where rooms share an edge (visually identical but it
+    keeps the data simple — downstream rasterisation merges them).
+    """
+    polys: list[Polygon] = []
+    t = thickness / 2.0
+    for room in layout.rooms:
+        r = room.rect
+        polys.extend(
+            [
+                Polygon(
+                    points=[
+                        (r.x - t, r.y - t),
+                        (r.x2 + t, r.y - t),
+                        (r.x2 + t, r.y + t),
+                        (r.x - t, r.y + t),
+                    ],
+                    category="wall",
+                ),
+                Polygon(
+                    points=[
+                        (r.x - t, r.y2 - t),
+                        (r.x2 + t, r.y2 - t),
+                        (r.x2 + t, r.y2 + t),
+                        (r.x - t, r.y2 + t),
+                    ],
+                    category="wall",
+                ),
+                Polygon(
+                    points=[
+                        (r.x - t, r.y - t),
+                        (r.x + t, r.y - t),
+                        (r.x + t, r.y2 + t),
+                        (r.x - t, r.y2 + t),
+                    ],
+                    category="wall",
+                ),
+                Polygon(
+                    points=[
+                        (r.x2 - t, r.y - t),
+                        (r.x2 + t, r.y - t),
+                        (r.x2 + t, r.y2 + t),
+                        (r.x2 - t, r.y2 + t),
+                    ],
+                    category="wall",
+                ),
+            ]
+        )
+    return polys
+
+
+def _door_polygon_from_spec(spec, thickness: float = 6.0) -> Polygon:
+    """Door represented as a thin oriented rectangle straddling a wall."""
+    if spec.orientation == "v":
+        pts = [
+            (spec.fixed - thickness, spec.lo),
+            (spec.fixed + thickness, spec.lo),
+            (spec.fixed + thickness, spec.hi),
+            (spec.fixed - thickness, spec.hi),
+        ]
+    else:
+        pts = [
+            (spec.lo, spec.fixed - thickness),
+            (spec.hi, spec.fixed - thickness),
+            (spec.hi, spec.fixed + thickness),
+            (spec.lo, spec.fixed + thickness),
+        ]
+    return Polygon(points=pts, category="door")
+
+
+def _window_polygon_from_spec(spec, thickness: float = 5.0) -> Polygon:
+    if spec.orientation == "v":
+        pts = [
+            (spec.fixed - thickness, spec.lo),
+            (spec.fixed + thickness, spec.lo),
+            (spec.fixed + thickness, spec.hi),
+            (spec.fixed - thickness, spec.hi),
+        ]
+    else:
+        pts = [
+            (spec.lo, spec.fixed - thickness),
+            (spec.hi, spec.fixed - thickness),
+            (spec.hi, spec.fixed + thickness),
+            (spec.lo, spec.fixed + thickness),
+        ]
+    return Polygon(points=pts, category="window")
+
+
+def planned_to_polygons(layout: PlannedLayout) -> list[Polygon]:
+    """Convert a :class:`PlannedLayout` to COCO-style polygons.
+
+    Categories are the canonical 4-class set (wall/window/door/room). Room
+    polygons additionally carry a ``subcategory`` indicating their semantic
+    type (kitchen/living/etc) so consumers can render labels.
+    """
+    polys: list[Polygon] = []
+    for room in layout.rooms:
+        polys.append(
+            Polygon(
+                points=room.rect.as_polygon(),
+                category="room",
+                subcategory=room.type,
+            )
+        )
+    polys.extend(_wall_strokes_from_planned(layout))
+    polys.extend(_door_polygon_from_spec(d) for d in layout.doors)
+    polys.extend(_window_polygon_from_spec(w) for w in layout.windows)
+    return polys
+
+
+def _try_label_font(size: int) -> ImageFont.ImageFont:
+    """Best-effort attempt to load a TrueType font; fall back to default bitmap font."""
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    ]
+    for path in candidates:
+        try:
+            return ImageFont.truetype(path, size=size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def render_planned(layout: PlannedLayout, draw_labels: bool = True) -> np.ndarray:
+    """Render a :class:`PlannedLayout` to an RGB image.
+
+    Each room is filled with a colour determined by its semantic type and
+    optionally labelled with its type name.
+    """
+    img = Image.new("RGB", (layout.width, layout.height), color=(245, 245, 245))
+    draw = ImageDraw.Draw(img)
+
+    # Rooms first (so walls/doors paint over them).
+    for room in layout.rooms:
+        color = ROOM_TYPE_COLORS.get(room.type, ROOM_TYPE_COLORS["room"])
+        r = room.rect
+        draw.rectangle([r.x, r.y, r.x2, r.y2], fill=color, outline=None)
+
+    # Walls.
+    for poly in _wall_strokes_from_planned(layout):
+        draw.polygon(poly.points, fill=(40, 40, 40))
+
+    # Doors as orange gaps.
+    for d in layout.doors:
+        spec = d
+        if spec.orientation == "v":
+            x = spec.fixed - 5
+            draw.rectangle([x, spec.lo, x + 10, spec.hi], fill=(245, 245, 245))
+            draw.rectangle([x, spec.lo, x + 10, spec.hi], outline=(220, 100, 60), width=2)
+        else:
+            y = spec.fixed - 5
+            draw.rectangle([spec.lo, y, spec.hi, y + 10], fill=(245, 245, 245))
+            draw.rectangle([spec.lo, y, spec.hi, y + 10], outline=(220, 100, 60), width=2)
+
+    # Windows as blue strokes.
+    for w in layout.windows:
+        if w.orientation == "v":
+            draw.rectangle(
+                [w.fixed - 5, w.lo, w.fixed + 5, w.hi],
+                fill=(60, 140, 220),
+            )
+        else:
+            draw.rectangle(
+                [w.lo, w.fixed - 5, w.hi, w.fixed + 5],
+                fill=(60, 140, 220),
+            )
+
+    # Labels last.
+    if draw_labels:
+        font = _try_label_font(14)
+        for room in layout.rooms:
+            label = room.type
+            cx, cy = room.rect.centroid()
+            try:
+                bbox = draw.textbbox((cx, cy), label, font=font, anchor="mm")
+                draw.rectangle(
+                    [bbox[0] - 3, bbox[1] - 2, bbox[2] + 3, bbox[3] + 2],
+                    fill=(255, 255, 255),
+                    outline=(120, 120, 120),
+                )
+                draw.text((cx, cy), label, fill=(60, 60, 60), font=font, anchor="mm")
+            except (TypeError, AttributeError):
+                # Older PIL doesn't support anchor — fall back to top-left placement.
+                draw.text((room.rect.x + 4, room.rect.y + 4), label, fill=(60, 60, 60), font=font)
+
+    return np.array(img)
+
+
+def planned_to_mask(layout: PlannedLayout) -> np.ndarray:
+    """Return a 4-class index mask (uint8 H×W) for the planned layout.
+
+    Class indices match :data:`MASK_BACKGROUND`/``WALL``/``WINDOW``/``DOOR``/``ROOM``.
+    """
+    mask = Image.new("L", (layout.width, layout.height), color=MASK_BACKGROUND)
+    draw = ImageDraw.Draw(mask)
+
+    for room in layout.rooms:
+        r = room.rect
+        draw.rectangle([r.x, r.y, r.x2, r.y2], fill=MASK_ROOM)
+
+    for poly in _wall_strokes_from_planned(layout):
+        draw.polygon(poly.points, fill=MASK_WALL)
+
+    for d in layout.doors:
+        if d.orientation == "v":
+            draw.rectangle([d.fixed - 6, d.lo, d.fixed + 6, d.hi], fill=MASK_DOOR)
+        else:
+            draw.rectangle([d.lo, d.fixed - 6, d.hi, d.fixed + 6], fill=MASK_DOOR)
+
+    for w in layout.windows:
+        if w.orientation == "v":
+            draw.rectangle([w.fixed - 6, w.lo, w.fixed + 6, w.hi], fill=MASK_WINDOW)
+        else:
+            draw.rectangle([w.lo, w.fixed - 6, w.hi, w.fixed + 6], fill=MASK_WINDOW)
+
+    return np.array(mask, dtype=np.uint8)
+
+
+def generate_semantic_layout(
+    width: int = 640,
+    height: int = 480,
+    num_rooms: int = 5,
+    boundary_shape: str = "auto",
+    room_types: list[str] | None = None,
+    seed: int | None = None,
+    draw_labels: bool = True,
+) -> tuple[np.ndarray, list[Polygon], PlannedLayout]:
+    """Top-level helper used by API + dataset generation.
+
+    Returns ``(rgb, polygons, plan)``. The plan is exposed so callers can
+    inspect / serialise the high-level structure (boundary shape, room types,
+    door/window placements).
+    """
+    plan = plan_layout(
+        width=width,
+        height=height,
+        num_rooms=num_rooms,
+        boundary_shape=boundary_shape,
+        room_types=room_types,
+        seed=seed,
+    )
+    rgb = render_planned(plan, draw_labels=draw_labels)
+    polys = planned_to_polygons(plan)
+    return rgb, polys, plan
