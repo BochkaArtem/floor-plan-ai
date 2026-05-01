@@ -17,7 +17,8 @@ htmlcov/
 
 # Project data
 data/
-models/*.pt
+# models/*.pt is tracked via Git LFS (see .gitattributes); other model
+# formats remain ignored.
 models/*.pth
 models/*.ckpt
 models/*.bin

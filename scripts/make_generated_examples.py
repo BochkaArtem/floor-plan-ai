@@ -14,7 +14,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from backend.ml.generation import GenerationConditions, get_default_generator  # noqa: E402
+from backend.ml.generation import (  # noqa: E402
+    GenerationConditions,
+    select_generator,
+)
 from backend.utils.image import save_image  # noqa: E402
 
 EXAMPLES = [
@@ -77,9 +80,9 @@ EXAMPLES = [
 ]
 
 
-def main(out_dir: Path) -> None:
+def main(out_dir: Path, backend: str) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
-    generator = get_default_generator()
+    generator = select_generator(backend)
     print(f"Using generator: {generator.name}")
 
     for ex in EXAMPLES:
@@ -103,5 +106,11 @@ def main(out_dir: Path) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out-dir", type=Path, default=ROOT / "demo" / "generated")
+    parser.add_argument(
+        "--backend",
+        choices=["auto", "nn", "procedural"],
+        default="procedural",
+        help="Which generator to use (default: procedural for stable demos).",
+    )
     args = parser.parse_args()
-    main(args.out_dir)
+    main(args.out_dir, args.backend)
