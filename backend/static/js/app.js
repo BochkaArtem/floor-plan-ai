@@ -373,11 +373,16 @@ let lastGenerated = null;
 
 document.getElementById("gen-run").addEventListener("click", async () => {
   setStatus("gen-status", "Генерируем…");
+  const room_types = Array.from(
+    document.querySelectorAll('fieldset.room-types input[name="rt"]:checked'),
+  ).map((el) => el.value);
   const body = {
     width: Number(document.getElementById("gen-width").value),
     height: Number(document.getElementById("gen-height").value),
     num_rooms: Number(document.getElementById("gen-rooms").value),
     boundary_shape: document.getElementById("gen-shape").value,
+    room_types,
+    backend: document.getElementById("gen-backend").value,
   };
   const area = Number(document.getElementById("gen-area").value);
   if (area > 0) body.area_m2 = area;
@@ -397,7 +402,11 @@ document.getElementById("gen-run").addEventListener("click", async () => {
   genImage.src = data.data_url;
   genImage.classList.add("visible");
   genEmpty.style.display = "none";
-  setStatus("gen-status", `Готово (${data.model}).`);
+  const shapeLabel = data.boundary_shape || body.boundary_shape;
+  setStatus(
+    "gen-status",
+    `Готово (${data.model}, форма: ${shapeLabel}, комнат: ${data.polygons.filter((p) => p.category === "room").length}).`,
+  );
   document.getElementById("model-badge").textContent = `generation: ${data.model}`;
   lastGenerated = data;
   document.getElementById("gen-to-editor").disabled = false;

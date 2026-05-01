@@ -6,7 +6,7 @@ from pathlib import Path
 
 from flask import Flask, send_from_directory
 
-from backend.ml.generation import get_default_generator
+from backend.ml.generation import MaskUNetGenerator, get_default_generator
 from backend.ml.segmentation import UNetSegmenter
 from backend.routes import detect, export, generate, upload
 
@@ -35,11 +35,20 @@ def create_app() -> Flask:
         return send_from_directory(STATIC_DIR, "index.html")
 
     @app.route("/health")
-    def health() -> dict[str, str]:
+    def health() -> dict[str, object]:
+        nn_gen = MaskUNetGenerator()
         return {
             "status": "ok",
             "segmenter": "unet" if app.config["SEGMENTER"].available() else "classical-cv",
-            "generator": app.config["GENERATOR"].name,
+            "generator": "mask-unet" if nn_gen.available() else "procedural",
+            "generator_backends_available": {
+                "procedural": True,
+                "nn": nn_gen.available(),
+            },
+            "boundary_shapes": ["rect", "L", "T", "U", "plus", "random", "auto"],
+            "room_types": [
+                "hall", "living", "kitchen", "bedroom", "bathroom", "balcony",
+            ],
         }
 
     return app

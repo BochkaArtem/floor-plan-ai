@@ -83,3 +83,34 @@ def test_generate_endpoint(client) -> None:
     assert payload["width"] == 320 and payload["height"] == 240
     assert payload["data_url"].startswith("data:image/png;base64,")
     assert isinstance(payload["polygons"], list)
+
+
+def test_generate_with_room_types_and_shape(client) -> None:
+    resp = client.post(
+        "/api/generate",
+        json={
+            "width": 320,
+            "height": 240,
+            "num_rooms": 5,
+            "boundary_shape": "L",
+            "room_types": ["hall", "living", "kitchen", "bedroom", "bathroom"],
+            "backend": "procedural",
+            "seed": 13,
+        },
+    )
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload["boundary_shape"] == "L"
+    # Each room polygon carries a subcategory.
+    room_polys = [p for p in payload["polygons"] if p["category"] == "room"]
+    assert room_polys
+    assert any(p.get("subcategory") in {"hall", "living", "kitchen", "bedroom", "bathroom"} for p in room_polys)
+
+
+def test_health_reports_backends(client) -> None:
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert "boundary_shapes" in payload and "rect" in payload["boundary_shapes"]
+    assert "room_types" in payload and "kitchen" in payload["room_types"]
+    assert "generator_backends_available" in payload
